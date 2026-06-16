@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fable 5 Pinger</title>
+<style>
+  :root {
+    --bg: #0a0e14;
+    --panel: #121823;
+    --line: #1f2a3a;
+    --text: #e6edf3;
+    --muted: #8b98a9;
+    --green: #2ecc71;
+    --amber: #f5a623;
+    --red: #e74c3c;
+    --accent: #4aa3ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .card {
+    width: 100%; max-width: 460px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 16px; padding: 28px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.45);
+  }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  .sub { color: var(--muted); margin: 0 0 22px; font-size: 13px; }
+  code { background: #0c121b; padding: 2px 6px; border-radius: 5px; color: var(--accent); }
+  .status {
+    display: flex; align-items: center; gap: 14px; padding: 18px;
+    background: #0c121b; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 18px;
+  }
+  .dot {
+    width: 16px; height: 16px; border-radius: 50%; background: var(--muted);
+    flex: 0 0 auto; box-shadow: 0 0 0 0 rgba(0,0,0,0);
+  }
+  .dot.live { background: var(--green); animation: pulse 1.2s infinite; }
+  .dot.waiting { background: var(--amber); }
+  .dot.error { background: var(--red); }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(46,204,113,.6); }
+    70% { box-shadow: 0 0 0 12px rgba(46,204,113,0); }
+    100% { box-shadow: 0 0 0 0 rgba(46,204,113,0); }
+  }
+  .status .label { font-weight: 600; font-size: 16px; }
+  .status .detail { color: var(--muted); font-size: 12.5px; word-break: break-word; }
+  .meta { font-size: 12.5px; color: var(--muted); display: flex; justify-content: space-between; margin-bottom: 20px; }
+  .btns { display: flex; gap: 10px; flex-wrap: wrap; }
+  button {
+    flex: 1; min-width: 120px; padding: 11px 14px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--line); background: #1a2433; color: var(--text); font-size: 14px;
+    transition: .15s;
+  }
+  button:hover { background: #223046; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #04101f; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+  button:disabled { opacity: .5; cursor: default; }
+  .armed-note { font-size: 12px; margin-top: 14px; color: var(--muted); text-align: center; }
+  .armed-note.on { color: var(--green); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>🛰️ Fable 5 Pinger</h1>
+    <p class="sub">Pinging <code id="model">claude-fable-5</code> every 10 minutes. Siren sounds the moment it answers.</p>
+
+    <div class="status">
+      <div id="dot" class="dot"></div>
+      <div>
+        <div id="label" class="label">Not started</div>
+        <div id="detail" class="detail">Arm the siren to begin.</div>
+      </div>
+    </div>
+
+    <div class="meta">
+      <span id="lastCheck">Last check: —</span>
+      <span id="nextCheck">Next: —</span>
+    </div>
+
+    <div class="btns">
+      <button id="armBtn" class="primary">🔔 Arm siren &amp; start</button>
+      <button id="checkBtn">Check now</button>
+      <button id="testBtn">▶ Test siren</button>
+    </div>
+  </div>
+
+<script>
+const INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+let armed = false;
+let timer = null;
+let countdownTimer = null;
+let nextCheckAt = 0;
+let alreadyCelebrated = false;
+
+const el = (id) => document.getElementById(id);
+
+// --- siren.mp3 playback (loops until stopped) ---
+const siren = new Audio("/siren.mp3");
+siren.loop = true;
+siren.preload = "auto";
+
+function setTestBtn(playing) {
+  el("testBtn").textContent = playing ? "⏹ Stop siren" : "▶ Test siren";
+}
+
+function startSiren() {
+  siren.currentTime = 0;
+  siren.play().catch((e) => console.warn("siren play blocked:", e.message));
+  setTestBtn(true);
+}
+
+function stopSiren() {
+  siren.pause();
+  siren.currentTime = 0;
+  setTestBtn(false);
+}
+
+function toggleSiren() {
+  if (siren.paused) startSiren();
+  else stopSiren();
+}
+
+siren.addEventListener("ended", () => setTestBtn(false)); // safety, though loop is on
+
+function setStatus(state, label, detail) {
+  el("dot").className = "dot " + (state || "");
+  el("label").textContent = label;
+  if (detail !== undefined) el("detail").textContent = detail;
+}
+
+function fmtTime(d) {
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+async function runCheck() {
+  setStatus(el("dot").className.includes("live") ? "live" : "", "Checking…", undefined);
+  try {
+    const res = await fetch("/check", { cache: "no-store" });
+    const data = await res.json();
+    el("lastCheck").textContent = "Last check: " + fmtTime(new Date());
+
+    if (data.working) {
+      setStatus("live", "✅ FABLE 5 IS LIVE", data.detail);
+      if (!alreadyCelebrated) {
+        alreadyCelebrated = true;
+        startSiren();
+        document.title = "🚨 FABLE 5 IS LIVE";
+      }
+    } else if (data.reason === "not_available") {
+      alreadyCelebrated = false;
+      setStatus("waiting", "Not available yet", `HTTP ${data.status} · ${data.detail}`);
+    } else if (data.reason === "no_api_key") {
+      setStatus("error", "No API key", data.detail);
+    } else {
+      alreadyCelebrated = false;
+      setStatus("error", "Error / not live", `${data.reason} · ${data.detail}`);
+    }
+  } catch (e) {
+    setStatus("error", "Pinger unreachable", e.message);
+  }
+  scheduleNext();
+}
+
+function scheduleNext() {
+  nextCheckAt = Date.now() + INTERVAL_MS;
+  clearTimeout(timer);
+  timer = setTimeout(runCheck, INTERVAL_MS);
+}
+
+function startCountdown() {
+  clearInterval(countdownTimer);
+  countdownTimer = setInterval(() => {
+    if (!nextCheckAt) return;
+    const ms = Math.max(0, nextCheckAt - Date.now());
+    const m = Math.floor(ms / 60000);
+    const s = Math.floor((ms % 60000) / 1000);
+    el("nextCheck").textContent = `Next: ${m}:${String(s).padStart(2, "0")}`;
+  }, 1000);
+}
+
+// Briefly unlock audio playback within a user gesture (autoplay policy).
+function unlockAudio() {
+  siren.play().then(() => { siren.pause(); siren.currentTime = 0; setTestBtn(false); }).catch(() => {});
+}
+
+el("armBtn").addEventListener("click", () => {
+  unlockAudio();
+  armed = true;
+  el("armBtn").disabled = true;
+  el("armBtn").textContent = "✅ Armed";
+  startCountdown();
+  runCheck();
+});
+
+el("checkBtn").addEventListener("click", () => {
+  runCheck();
+});
+
+el("testBtn").addEventListener("click", () => {
+  toggleSiren();
+});
+</script>
+</body>
+</html>
