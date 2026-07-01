@@ -61,12 +61,16 @@
   button:disabled { opacity: .5; cursor: default; }
   .armed-note { font-size: 12px; margin-top: 14px; color: var(--muted); text-align: center; }
   .armed-note.on { color: var(--green); }
+  #confetti {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 9999;
+  }
 </style>
 </head>
 <body>
   <div class="card">
     <h1>🛰️ Fable 5 Pinger</h1>
-    <p class="sub">Pinging <code id="model">claude-fable-5</code> every 10 minutes. Siren sounds the moment it answers.</p>
+    <p class="sub">Pinging <code id="model">claude-fable-5</code> every 2 minutes. Siren sounds the moment it answers.</p>
 
     <div class="status">
       <div id="dot" class="dot"></div>
@@ -88,8 +92,10 @@
     </div>
   </div>
 
+  <canvas id="confetti"></canvas>
+
 <script>
-const INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+const INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
 let armed = false;
 let timer = null;
 let countdownTimer = null;
@@ -126,6 +132,69 @@ function toggleSiren() {
 
 siren.addEventListener("ended", () => setTestBtn(false)); // safety, though loop is on
 
+// --- celebratory confetti burst ---
+const confettiCanvas = el("confetti");
+const confettiCtx = confettiCanvas.getContext("2d");
+const CONFETTI_COLORS = ["#e74c3c", "#4aa3ff", "#f5a623", "#2ecc71", "#9b59b6", "#ff6ec7", "#f9f871"];
+let confettiParticles = [];
+let confettiRAF = null;
+
+function resizeConfetti() {
+  confettiCanvas.width = window.innerWidth;
+  confettiCanvas.height = window.innerHeight;
+}
+window.addEventListener("resize", resizeConfetti);
+resizeConfetti();
+
+function spawnConfetti(count) {
+  const w = confettiCanvas.width;
+  const h = confettiCanvas.height;
+  for (let i = 0; i < count; i++) {
+    confettiParticles.push({
+      x: Math.random() * w,
+      y: -20 - Math.random() * h * 0.3,
+      vx: (Math.random() - 0.5) * 6,
+      vy: 2 + Math.random() * 5,
+      size: 6 + Math.random() * 8,
+      color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+      rot: Math.random() * Math.PI * 2,
+      vr: (Math.random() - 0.5) * 0.3,
+    });
+  }
+}
+
+function drawConfetti() {
+  const w = confettiCanvas.width;
+  const h = confettiCanvas.height;
+  confettiCtx.clearRect(0, 0, w, h);
+  for (const p of confettiParticles) {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.08; // gravity
+    p.rot += p.vr;
+    confettiCtx.save();
+    confettiCtx.translate(p.x, p.y);
+    confettiCtx.rotate(p.rot);
+    confettiCtx.fillStyle = p.color;
+    confettiCtx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+    confettiCtx.restore();
+  }
+  confettiParticles = confettiParticles.filter((p) => p.y < h + 30);
+  if (confettiParticles.length > 0) {
+    confettiRAF = requestAnimationFrame(drawConfetti);
+  } else {
+    confettiCtx.clearRect(0, 0, w, h);
+    confettiRAF = null;
+  }
+}
+
+function startConfetti() {
+  spawnConfetti(160);
+  setTimeout(() => spawnConfetti(120), 300);
+  setTimeout(() => spawnConfetti(120), 700);
+  if (!confettiRAF) drawConfetti();
+}
+
 function setStatus(state, label, detail) {
   el("dot").className = "dot " + (state || "");
   el("label").textContent = label;
@@ -148,6 +217,7 @@ async function runCheck() {
       if (!alreadyCelebrated) {
         alreadyCelebrated = true;
         startSiren();
+        startConfetti();
         document.title = "🚨 FABLE 5 IS LIVE";
       }
     } else if (data.reason === "not_available") {
