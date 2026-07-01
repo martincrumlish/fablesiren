@@ -123,6 +123,7 @@ function stopSiren() {
   siren.pause();
   siren.currentTime = 0;
   setTestBtn(false);
+  stopConfetti();
 }
 
 function toggleSiren() {
@@ -138,6 +139,7 @@ const confettiCtx = confettiCanvas.getContext("2d");
 const CONFETTI_COLORS = ["#e74c3c", "#4aa3ff", "#f5a623", "#2ecc71", "#9b59b6", "#ff6ec7", "#f9f871"];
 let confettiParticles = [];
 let confettiRAF = null;
+let confettiLoop = null;
 
 function resizeConfetti() {
   confettiCanvas.width = window.innerWidth;
@@ -193,6 +195,16 @@ function startConfetti() {
   setTimeout(() => spawnConfetti(120), 300);
   setTimeout(() => spawnConfetti(120), 700);
   if (!confettiRAF) drawConfetti();
+  // keep it raining until the siren is stopped
+  clearInterval(confettiLoop);
+  confettiLoop = setInterval(() => spawnConfetti(40), 400);
+}
+
+function stopConfetti() {
+  // stop spawning new pieces; existing ones finish falling, then
+  // drawConfetti() clears the canvas and halts itself
+  clearInterval(confettiLoop);
+  confettiLoop = null;
 }
 
 function setStatus(state, label, detail) {

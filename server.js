@@ -25,6 +25,7 @@ const path = require("path");
 })(path.join(__dirname, ".env"));
 
 const { checkEndpoint, MODEL } = require("./lib/checkEndpoint");
+const { notifyIfLive, clearNotified } = require("./lib/notify");
 const PORT = 5757;
 const PUBLIC = path.join(__dirname, "public");
 
@@ -75,6 +76,14 @@ const server = http.createServer(async (req, res) => {
     const result = await checkEndpoint();
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
     res.end(JSON.stringify({ ...result, model: MODEL, time: new Date().toISOString() }));
+    return;
+  }
+  if (urlPath === "/api/cron") {
+    if (/[?&]reset=1(&|$)/.test(req.url)) await clearNotified();
+    const result = await checkEndpoint();
+    const notify = await notifyIfLive(result);
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ ...result, model: MODEL, notify, time: new Date().toISOString() }));
     return;
   }
   serveStatic(req, res, urlPath);
