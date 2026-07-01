@@ -231,6 +231,9 @@ async function runCheck() {
         startSiren();
         startConfetti();
         document.title = "🚨 FABLE 5 IS LIVE";
+        // Also trigger the server-side WhatsApp alert (deduped by KV) so an
+        // open tab guarantees the message even if the Vercel cron is throttled.
+        fetch("/api/cron", { cache: "no-store" }).catch(() => {});
       }
     } else if (data.reason === "not_available") {
       alreadyCelebrated = false;
